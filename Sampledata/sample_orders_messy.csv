@@ -1,0 +1,11 @@
+order_id,customer_id,customer_name,order_date,product,quantity,unit_price,total_amount
+1001,C001,Ravi Kumar,2025-03-01,Wireless Mouse,2,499.00,998.00
+1002,C002,Anjali Sharma,2025-03-02,USB-C Cable,3,199.00,597.00
+1003,C003,Vikram Singh,2025-03-03,Laptop Stand,1,1299.00,1299.00
+1004,C004,Priya Nair,2025-03-04,Bluetooth Speaker,1,1899.00,1899.00
+1005,C005,Suresh Reddy,2025-03-05,Mechanical Keyboard,1,3499.00,3499.00
+1006,C006,Meena Iyer,14/03/2025,Webcam,2,1599.00,3198.00
+1007,C007,,2025-03-07,Monitor Stand,1,899.00,899.00
+1008,C008,Arjun Rao,2025-03-08,HDMI Cable,five,299.00,299.00
+1009,C009,Divya Menon,2025-03-09,External SSD,1,-50.00,-50.00
+1003,C010,Kavita Joshi,2025-03-10,Laptop Stand,1,1299.00,1299.00

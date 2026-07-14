@@ -1,0 +1,565 @@
+{
+  "name": "ETL Self-Healing Pipeline",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "8277fba5-3403-46a1-9337-996768259329",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "fileSelector": "/home/node/.n8n-files/sample_orders_messy.csv",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1.1,
+      "position": [
+        208,
+        0
+      ],
+      "id": "18029167-e01e-4d4c-a2b0-668238c66804",
+      "name": "Read/Write Files from Disk"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        416,
+        0
+      ],
+      "id": "1afa6f6c-56e9-4585-8b81-ba3d37525905",
+      "name": "Extract from File"
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.1-flash-lite",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.1,
+      "position": [
+        1168,
+        288
+      ],
+      "id": "67a41d0d-bb64-449d-9deb-f4a0935944bc",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "LnaBh7CKevgcH3mA",
+          "name": "Google Gemini(PaLM) Api account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\n// Count how many times each order_id appears\nconst idCounts = {};\nitems.forEach(item => {\n  const id = item.json.order_id;\n  idCounts[id] = (idCounts[id] || 0) + 1;\n});\n\nconst seenIds = new Set();\n\nreturn items.map(item => {\n  const row = { ...item.json };\n  const id = row.order_id;\n\n  if (idCounts[id] > 1) {\n    if (seenIds.has(id)) {\n      // This is a repeat occurrence — flag it as invalid\n      row.validation_errors = [\n        ...(row.validation_errors || []),\n        { field: \"order_id\", issue: \"duplicate_order_id\", raw_value: id }\n      ];\n      row.is_valid = false;\n    } else {\n      // First occurrence of this ID — mark as seen, leave as-is\n      seenIds.add(id);\n    }\n  }\n\n  return { json: row };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        816,
+        -16
+      ],
+      "id": "25853fe0-80ac-447f-8d6d-4ac9ec9cc9ff",
+      "name": "Duplicate detection"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const row = $input.item.json;\nconst errors = [];\n\n// Check 1: customer_name must not be empty\nif (!row.customer_name || row.customer_name.trim() === \"\") {\n  errors.push({ field: \"customer_name\", issue: \"missing_field\" });\n}\n\n// Check 2: order_date must be ISO format (YYYY-MM-DD)\nconst isoDateRegex = /^\\d{4}-\\d{2}-\\d{2}$/;\nif (!isoDateRegex.test(String(row.order_date))) {\n  errors.push({ field: \"order_date\", issue: \"date_format\", raw_value: row.order_date });\n}\n\n// Check 3: quantity must be a valid number\nif (isNaN(Number(row.quantity))) {\n  errors.push({ field: \"quantity\", issue: \"type_mismatch\", raw_value: row.quantity });\n}\n\n// Check 4: unit_price must not be negative\nif (Number(row.unit_price) < 0) {\n  errors.push({ field: \"unit_price\", issue: \"ambiguous_data\", raw_value: row.unit_price });\n}\n\nreturn {\n  json: {\n    ...row,\n    is_valid: errors.length === 0,\n    validation_errors: errors\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        608,
+        -16
+      ],
+      "id": "9c6e9726-18c3-417a-a6ae-d31287ffa9c8",
+      "name": "Validate schema"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "74cdb8b6-a9ee-412c-b098-42deee982700",
+              "leftValue": "={{ $json.is_valid }}",
+              "rightValue": "True",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1024,
+        -16
+      ],
+      "id": "1365c3fa-60c2-4ae6-818c-4fcce3f695f2",
+      "name": "Route: Valid or Invalid"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ JSON.stringify($json) }}",
+        "messages": {
+          "messageValues": [
+            {
+              "message": "=You are a data pipeline diagnostic agent. You will receive a record that failed schema validation, along with its specific validation errors. Classify the failure and respond with ONLY valid JSON, no markdown formatting, no explanation outside the JSON:\n\n{\n  \"failure_type\": \"fixable\" or \"needs_human_review\",\n  \"category\": \"date_format\" or \"missing_field\" or \"type_mismatch\" or \"ambiguous_data\" or \"other\",\n  \"suggested_fix\": \"<the corrected value, or null>\",\n  \"confidence\": <a number between 0.0 and 1.0>,\n  \"explanation\": \"<one sentence explaining the issue for a human log>\"\n}\n\nRules:\n- Only mark \"fixable\" if confidence > 0.85 AND the fix is unambiguous (e.g., converting \"14/03/2025\" to \"2025-03-14\" is safe).\n- NEVER mark something fixable if it requires guessing missing business data (e.g., a blank customer name, a negative price that could mean many things)."
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        1232,
+        80
+      ],
+      "id": "196a8e6f-e551-4baf-8ac3-20ad6819c289",
+      "name": "Gemini Diagnosis Agent"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const rawText = $json.text; // adjust field name if different — check your actual output field\nconst parsed = JSON.parse(rawText);\n\nreturn {\n  json: {\n    ...$('Route: Valid or Invalid').item.json, // pulls back the original row data\n    ...parsed // adds failure_type, category, suggested_fix, confidence, explanation\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1584,
+        80
+      ],
+      "id": "8c9807ed-5194-4ee9-9ae9-69da0627130b",
+      "name": "Parse Gemini Response"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "7f1731b7-aace-4fd9-882c-444e3e06c221",
+              "leftValue": "={{ $json.failure_type }}",
+              "rightValue": "fixable",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1792,
+        80
+      ],
+      "id": "d8c72149-f4c3-44b2-8fd6-530bb52d28ce",
+      "name": "Route: Fixable or Review"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const row = $input.item.json;\nconst errorField = row.validation_errors[0].field; // the field that failed\nconst fixedRow = { ...row };\n\nfixedRow[errorField] = row.suggested_fix; // apply the correction\nfixedRow.was_auto_fixed = true;\nfixedRow.fix_applied = `${errorField}: \"${row.validation_errors[0].raw_value}\" → \"${row.suggested_fix}\"`;\n\nreturn { json: fixedRow };"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        -176
+      ],
+      "id": "c03cd04b-d309-4650-8c3a-7ea4b3a51398",
+      "name": "Apply Auto-Fix"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1376,
+        -144
+      ],
+      "id": "e08e91b7-9b5b-4e30-bd98-95f5ffeed205",
+      "name": "Merge Clean + Fixed Rows"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        2192,
+        -16
+      ],
+      "id": "21fff25b-4771-4a3d-a652-a51d1c65521b",
+      "name": "Convert to CSV (Clean)"
+    },
+    {
+      "parameters": {
+        "operation": "write",
+        "fileName": "/home/node/.n8n-files/clean_orders_output.csv",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1.1,
+      "position": [
+        2416,
+        -16
+      ],
+      "id": "8cc48ad1-d29c-4756-95c4-8edecbe0b253",
+      "name": "Write Clean Orders CSV"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const row = $input.item.json;\nreturn {\n  json: {\n    order_id: row.order_id,\n    issue_field: row.validation_errors[0].field,\n    issue_category: row.category,\n    raw_value: row.validation_errors[0].raw_value,\n    ai_explanation: row.explanation,\n    needs_review: true,\n    flagged_at: new Date().toISOString()\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        176
+      ],
+      "id": "167c4c63-8de8-4488-a4c8-484501c0669a",
+      "name": "Format Escalation Log"
+    },
+    {
+      "parameters": {
+        "fromEmail": "hrithiktata@gmail.com",
+        "toEmail": "hrithiktata@gmail.com",
+        "subject": "=ETL Alert: Order {{ $json.order_id }} needs review",
+        "emailFormat": "text",
+        "text": "=Order ID: {{ $json.order_id }}\n     Issue: {{ $json.issue_category }} in field \"{{ $json.issue_field }}\"\n     Raw value: {{ $json.raw_value }}\n     AI Explanation: {{ $json.ai_explanation }}\n     Flagged at: {{ $json.flagged_at }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        2208,
+        176
+      ],
+      "id": "f7b2560b-a603-43f0-9e27-8749a34b6400",
+      "name": "Alert: Email Human Reviewer",
+      "webhookId": "8dd5175b-3fef-4e06-8de7-a9e0f9c0153e",
+      "credentials": {
+        "smtp": {
+          "id": "v0vC9r7vjBk15ogZ",
+          "name": "SMTP account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        2432,
+        192
+      ],
+      "id": "dd7277a6-ec15-4bca-9f1b-e2dd61cd59e0",
+      "name": "Convert to CSV (Escalation)"
+    },
+    {
+      "parameters": {
+        "operation": "write",
+        "fileName": "/home/node/.n8n-files/escalation_log.csv",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1.1,
+      "position": [
+        2688,
+        192
+      ],
+      "id": "9d0326bd-893c-44fb-b218-65b6f90ffd88",
+      "name": "Write Escalation Log CSV"
+    },
+    {
+      "parameters": {
+        "content": "Deterministic validation — checks schema, format, and duplicates before any AI involvement\n"
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        48,
+        -224
+      ],
+      "id": "53a478a4-3d5c-477c-b2f5-17a667e6acea",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "AI only classifies FAILED rows. Confidence >0.85 required for auto-fix; ambiguous business data always escalates to human review."
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1328,
+        288
+      ],
+      "id": "67cc7622-2d8c-4de1-9fd2-630f704552a3",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "Human-in-the-loop: escalated rows never get silently modified\n"
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2144,
+        384
+      ],
+      "id": "181bb8e9-43bd-474a-96d3-c9140107c6f6",
+      "name": "Sticky Note2"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Read/Write Files from Disk",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read/Write Files from Disk": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "Validate schema",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Gemini Diagnosis Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Duplicate detection": {
+      "main": [
+        [
+          {
+            "node": "Route: Valid or Invalid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate schema": {
+      "main": [
+        [
+          {
+            "node": "Duplicate detection",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route: Valid or Invalid": {
+      "main": [
+        [
+          {
+            "node": "Merge Clean + Fixed Rows",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Gemini Diagnosis Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Diagnosis Agent": {
+      "main": [
+        [
+          {
+            "node": "Parse Gemini Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Gemini Response": {
+      "main": [
+        [
+          {
+            "node": "Route: Fixable or Review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route: Fixable or Review": {
+      "main": [
+        [
+          {
+            "node": "Apply Auto-Fix",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Escalation Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apply Auto-Fix": {
+      "main": [
+        [
+          {
+            "node": "Merge Clean + Fixed Rows",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge Clean + Fixed Rows": {
+      "main": [
+        [
+          {
+            "node": "Convert to CSV (Clean)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert to CSV (Clean)": {
+      "main": [
+        [
+          {
+            "node": "Write Clean Orders CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Escalation Log": {
+      "main": [
+        [
+          {
+            "node": "Alert: Email Human Reviewer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert: Email Human Reviewer": {
+      "main": [
+        [
+          {
+            "node": "Convert to CSV (Escalation)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert to CSV (Escalation)": {
+      "main": [
+        [
+          {
+            "node": "Write Escalation Log CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Escalation Log CSV": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "f85a2627-4ff5-4f7c-96f5-8a820772f22a",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "4ee944cd1d397e14de118ac98ba94211c5d429cfac3bb8c98ae2adb0e89b92cb"
+  },
+  "nodeGroups": [],
+  "id": "bi3NRZWUuDv4eiX8",
+  "tags": []
+}

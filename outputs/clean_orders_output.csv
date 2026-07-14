@@ -1,0 +1,8 @@
+﻿order_id,customer_id,customer_name,order_date,product,quantity,unit_price,total_amount,is_valid,validation_errors.0.field,validation_errors.0.issue,validation_errors.0.raw_value,failure_type,category,suggested_fix,confidence,explanation,was_auto_fixed,fix_applied
+1001,C001,Ravi Kumar,2025-03-01,Wireless Mouse,2,499.00,998.00,TRUE,,,,,,,,,,
+1002,C002,Anjali Sharma,2025-03-02,USB-C Cable,3,199.00,597.00,TRUE,,,,,,,,,,
+1003,C003,Vikram Singh,2025-03-03,Laptop Stand,1,1299.00,1299.00,TRUE,,,,,,,,,,
+1004,C004,Priya Nair,2025-03-04,Bluetooth Speaker,1,1899.00,1899.00,TRUE,,,,,,,,,,
+1005,C005,Suresh Reddy,2025-03-05,Mechanical Keyboard,1,3499.00,3499.00,TRUE,,,,,,,,,,
+1006,C006,Meena Iyer,2025-03-14,Webcam,2,1599.00,3198.00,FALSE,order_date,date_format,14/03/2025,fixable,date_format,2025-03-14,0.95,The order_date is in DD/MM/YYYY format and can be safely normalized to the ISO 8601 YYYY-MM-DD standard.,TRUE,"order_date: ""14/03/2025"" → ""2025-03-14"""
+1008,C008,Arjun Rao,2025-03-08,HDMI Cable,5,299.00,299.00,FALSE,quantity,type_mismatch,five,fixable,type_mismatch,5,0.95,The quantity field contains a word string instead of an integer; it can be safely converted to the numeric value 5.,TRUE,"quantity: ""five"" → ""5"""
